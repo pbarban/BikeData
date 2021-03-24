@@ -1,0 +1,92 @@
+rm(list = ls(all.names = TRUE))
+
+library(dplyr)
+
+#Paris
+library(stringr)
+Starting.date = "2021-01-01"
+Ending.date = Sys.Date()
+n = as.numeric(difftime(as.Date(Ending.date),as.Date(Starting.date), units = c("days")))
+
+seq = seq(as.Date(Starting.date), by = "day", length.out = n)
+seq = str_replace_all(seq, "-", "%2F")
+
+library(httr)
+library(jsonlite)
+
+data_list <- list()
+for (i in seq) {
+  res <- GET(paste0("https://opendata.paris.fr/api/records/1.0/search/?dataset=comptage-velo-donnees-compteurs&q=&rows=-1&facet=id_compteur&facet=nom_compteur&facet=id&facet=name&facet=date&facet=installation_date&refine.date=",i,"&timezone=Europe%2FBerlin"))
+  data_list[[length(data_list)+1]] = fromJSON(rawToChar(res$content))[["records"]][["fields"]]
+}
+data = do.call(rbind, data_list)
+
+#optional
+dest = "/Users/Pierre/Desktop/Academic/Velo - Paris/Historique/"
+
+setwd(dest)
+for (i in seq(2018,2020,1)) {
+url = paste0("https://parisdata.opendatasoft.com/api/datasets/1.0/comptage-velo-historique-donnees-compteurs/attachments/",i,"_comptage_velo_donnees_compteurs_csv_zip/")
+download.file(url,paste0(dest,i,"_comptage_velo_donnees_compteurs.zip"))
+unzip(zipfile = paste0(dest,i,"_comptage_velo_donnees_compteurs.zip"),exdir = ".")
+}
+
+temp = list.files(pattern="*.csv")
+for (i in 1:length(temp)) assign(temp[i], read.csv(temp[i], sep = ";"))
+ temp = list.files(pattern="*.csv|*.zip")
+unlink(temp)
+
+Olddata = do.call(rbind,lapply(ls(pattern = "*.csv"), get))
+
+oldnames = c("id_compteur", 
+              "nom_compteur" ,
+              "id",
+              "name",
+              "sum_counts" ,
+             "date",  
+               "installation_date",
+              "url_photos_n1", 
+             "coordinates")
+newnames = c("Identifiant.du.compteur",
+             "Nom.du.compteur" ,
+              "Identifiant.du.site.de.comptage",  
+              "Nom.du.site.de.comptage" ,      
+              "Comptage.horaire"  ,    
+              "Date.et.heure.de.comptage" ,             
+              "Date.d.installation.du.site.de.comptage",
+              "Lien.vers.photo.du.site.de.comptage" ,   
+              "Coordonnées.géographiques")
+
+data = data %>% rename_at(vars(oldnames), ~ newnames)
+
+Paris = rbind(data, Olddata)
+
+
+library(dplyr)
+Paris = Paris%>% mutate(Datetime = str_replace_all(Date.et.heure.de.comptage,"T", " "),
+                        Datetime = substr(Datetime,1,19),
+                        Datetime = as.POSIXct(Datetime, format = "%Y-%m-%d %H:%M:%S"),
+                        Date = as.Date(Datetime)) 
+
+
+library(ggplot2)
+plot1.Paris = Paris %>% 
+  group_by(Identifiant.du.compteur,Date)%>% summarise(DayCount = sum(Comptage.horaire,na.rm = T)) %>%
+  group_by(Date) %>% summarise(DayCount = mean(DayCount,na.rm = T)) %>%
+  ggplot()+
+  geom_rect(aes(xmin=as.Date("2019-12-05"),xmax=as.Date("2020-01-17"),ymin=-Inf,ymax=Inf,fill="Public Transit Strike"),colour=NA) +
+  geom_rect(aes(xmin=as.Date("2020-03-17"),xmax=as.Date("2020-05-11"),ymin=-Inf,ymax=Inf,fill="First Lockdown"),colour=NA) +
+  geom_rect(aes(xmin=as.Date("2020-10-30"),xmax=as.Date("2020-12-15"),ymin=-Inf,ymax=Inf,fill="Second Lockdown"),colour=NA) +
+  geom_rect(aes(xmin=as.Date("2021-01-16"),xmax=Sys.Date(),ymin=-Inf,ymax=Inf,fill="Curfew"),colour=NA) +
+  geom_line(aes(x =Date, y=DayCount),colour='#06067a', size = 0.5)+ 
+  ylab("") +
+  xlab("") + 
+  labs(title = "Average Number of Cyclists \nper Counting Monitor per Day", subtitle = "Paris, Jan. 2018 - March 2021") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 20),
+        plot.subtitle = element_text(colour = "#595a5c", size = 16),
+        legend.title = element_blank(),
+        legend.text = element_text( size = 14),
+        legend.position="top",
+        axis.text=element_text(size=12))
+  plot1.Paris
