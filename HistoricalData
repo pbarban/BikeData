@@ -79,9 +79,20 @@ Events =data.frame(Events=c("Public Transit Strike","First Lockdown","Second Loc
 
 
 library(ggplot2)
-plot1.Paris = Paris %>%
-  group_by(Identifiant.du.compteur,Date)%>% summarise(DayCount = sum(Comptage.horaire,na.rm = T)) %>%
-  group_by(Date) %>% summarise(DayCount = mean(DayCount,na.rm = T)) %>%
+plot1.Paris = Paris %>% 
+  mutate(Datetime = str_replace_all(Date.et.heure.de.comptage,"T", " "),
+         Datetime = substr(Datetime,1,19),
+         Datetime = as.POSIXct(Datetime, format = "%Y-%m-%d %H:%M:%S"),
+         Date = as.Date(Datetime))%>%
+  group_by(Datetime) %>% 
+  summarise(mean=mean(Comptage.horaire), sd=sd(Comptage.horaire))%>%
+  merge(Paris,by = "Datetime", all.y = T) %>% group_by(Datetime) %>% 
+  add_count() %>%
+  mutate(low_ci = mean - 1.96*(sd/sqrt(n)),
+         high_ci = mean + 1.96*(sd/sqrt(n))) %>%
+  ungroup() %>%
+  filter(Comptage.horaire > low_ci & Comptage.horaire < high_ci) %>% group_by(Date) %>% 
+  summarise(DayCount = mean(Comptage.horaire))%>% 
   filter(Date > as.Date("2019-01-01")) %>%
   ggplot()+
   geom_rect(data=Events, mapping=aes(xmin= Beginning, xmax=End, ymin=ymin, ymax=ymax, fill=Events), color=NA, alpha=0.5) +
